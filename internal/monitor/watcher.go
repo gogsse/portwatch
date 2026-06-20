@@ -1,73 +1,83 @@
 package monitor
 
 import (
-	"log"
 	"time"
 
+	"github.com/user/portwatch/internal/alert"
 	"github.com/user/portwatch/internal/scanner"
 )
 
-// PortState holds a snapshot of open ports at a given time.
-type PortState struct {
-	Ports     []int
-	Timestamp time.Time
-}
-
-// Watcher monitors open ports at a regular interval and reports changes.
+// Watcher periodically scans open ports and emits alerts on changes.
 type Watcher struct {
-	Interval  time.Duration
-	AlertFunc func(opened, closed []int)
-	stopCh    chan struct{}
+	interval time.Duration
+	notifier *alert.Notifier
+	prev     []int
+	stop     chan struct{}
 }
 
-// NewWatcher creates a Watcher with the given polling interval and alert callback.
-func NewWatcher(interval time.Duration, alertFunc func(opened, closed []int)) *Watcher {
+// NewWatcher creates a Watcher that scans at the given interval.
+func NewWatcher(interval time.Duration, notifier *alert.Notifier) *Watcher {
 	return &Watcher{
-		Interval:  interval,
-		AlertFunc: alertFunc,
-		stopCh:    make(chan struct{}),
+		interval: interval,
+		notifier: notifier,
+		stop:     make(chan struct{}),
 	}
 }
 
-// Start begins the monitoring loop. It blocks until Stop is called.
-func (w *Watcher) Start() {
-	ticker := time.NewTicker(w.Interval)
-	defer ticker.Stop()
-
-	prev, err := scanner.ScanOpenPorts()
+// Start begins the watch loop. It blocks until Stop is called.
+func (w *Watcher) Start() error {
+	ports, err := scanner.ScanOpenPorts()
 	if err != nil {
-		log.Printf("portwatch: initial scan failed: %v", err)
+		return err
 	}
+	w.prev = ports
+
+	ticker := time.NewTicker(w.interval)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			curr, err := scanner.ScanOpenPorts()
-			if err != nil {
-				log.Printf("portwatch: scan error: %v", err)
-				continue
+			if err := w.tick(); err != nil {
+				return err
 			}
-			opened, closed := diff(prev, curr)
-			if (len(opened) > 0 || len(closed) > 0) && w.AlertFunc != nil {
-				w.AlertFunc(opened, closed)
-			}
-			prev = curr
-		case <-w.stopCh:
-			return
+		case <-w.stop:
+			return nil
 		}
 	}
 }
 
-// Stop signals the monitoring loop to exit.
+// Stop signals the watch loop to exit.
 func (w *Watcher) Stop() {
-	close(w.stopCh)
+	close(w.stop)
 }
 
-// diff returns ports that were opened and ports that were closed
-// between the previous and current snapshots.
-func diff(prev, curr []int) (opened, closed []int) {
+func (w *Watcher) tick() error {
+	current, err := scanner.ScanOpenPorts()
+	if err != nil {
+		return err
+	}
+
+	opened, closed := diff(w.prev, current)
+
+	for _, p := range opened {
+		if err := w.notifier.NotifyOpened(p); err != nil {
+			return err
+		}
+	}
+	for _, p := range closed {
+		if err := w.notifier.NotifyClosed(p); err != nil {
+			return err
+		}
+	}
+
+	w.prev = current
+	return nil
+}
+
+func diff(prev, current []int) (opened, closed []int) {
 	prevSet := toSet(prev)
-	currSet := toSet(curr)
+	currSet := toSet(current)
 
 	for p := range currSet {
 		if !prevSet[p] {
