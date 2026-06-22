@@ -1,31 +1,34 @@
 # filter
 
-The `filter` package determines whether an open port is **expected** or **unexpected** based on a user-supplied allow-list and optional privileged-port exemptions.
+The `filter` package provides port filtering logic used to distinguish expected
+listeners from unexpected ones.
 
 ## Types
 
-### `Filter`
+### Filter
 
-Holds the allow-list and configuration flags.
-
-```go
-f := filter.New([]int{80, 443, 8080}, false)
-```
-
-Or build from string slices (e.g. loaded from config):
+Holds an allowed set of ports and optional privileged-port exemption.
 
 ```go
-f := filter.NewFromStrings(cfg.AllowedPorts, cfg.IgnorePrivileged)
+f := filter.New(map[int]struct{}{80: {}, 443: {}}, true)
 ```
 
-## Key Methods
+### NewFromStrings
+
+Parses a slice of string port numbers into a Filter.
+
+```go
+f, err := filter.NewFromStrings([]string{"22", "80", "443"}, false)
+```
+
+## Methods
 
 | Method | Description |
 |---|---|
-| `IsAllowed(port int) bool` | Returns true if the port is on the allow-list or exempt |
-| `Unexpected(ports []int) []int` | Filters a slice down to only unexpected ports |
-| `AllowedPorts() []int` | Returns the current allow-list snapshot |
+| `IsAllowed(port int) bool` | Returns true if port is in the allowed set or is a privileged port (when exemption enabled) |
+| `Unexpected(ports []int) []int` | Returns ports not covered by the filter |
 
-## Privileged Port Exemption
+## Privileged Exemption
 
-When `ignorePrivileged` is `true`, any port below **1024** is considered allowed regardless of the explicit list. This avoids noise on systems that expose many well-known service ports.
+When `ExemptPrivileged` is true, ports below 1024 are always considered allowed
+regardless of the allowed set. This reduces noise from well-known system services.
