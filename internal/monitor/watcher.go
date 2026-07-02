@@ -48,6 +48,7 @@ func (w *Watcher) Start() error {
 }
 
 // Stop signals the watch loop to exit.
+// It is safe to call Stop only once; calling it more than once will panic.
 func (w *Watcher) Stop() {
 	close(w.stop)
 }
@@ -75,6 +76,8 @@ func (w *Watcher) tick() error {
 	return nil
 }
 
+// diff computes the ports that were opened (present in current but not prev)
+// and the ports that were closed (present in prev but not current).
 func diff(prev, current []int) (opened, closed []int) {
 	prevSet := toSet(prev)
 	currSet := toSet(current)
